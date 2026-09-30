@@ -16,6 +16,12 @@ on:
         description: "Comma-separated IG usernames (optional override; default: IG_TARGETS secret)"
         required: false
         default: ""
+      await_code:
+        description: "One-time verification: wait for a challenge code committed as .challenge-code.json"
+        required: false
+        default: "false"
+        type: choice
+        options: ["false", "true"]
 
   # LIVE: runs every 10 minutes.
   schedule:
@@ -76,6 +82,9 @@ jobs:
           TARGETS: ${{ inputs.targets || secrets.IG_TARGETS }}
           # Scheduled runs have no inputs -> default to LIVE sends.
           DRY_RUN: ${{ inputs.dry_run || 'false' }}
+          # One-time verification runs poll the repo for the emailed code.
+          AWAIT_CHALLENGE_CODE: ${{ inputs.await_code || 'false' }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python automation/dm_autoreply.py
 
       - name: Persist bookmark state

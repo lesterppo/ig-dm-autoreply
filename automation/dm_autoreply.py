@@ -21,6 +21,15 @@ Env vars:
   DRY_RUN                       "true"/"false" (default "true" - never send unless explicit)
   STATE_PATH                    default: automation/state.json
   SESSION_PATH                  default: automation/.session.json (git-ignored, CI-cached)
+  AWAIT_CHALLENGE_CODE          "true" to poll the repo for a challenge code
+                                instead of failing (one-time verification runs)
+
+One-time challenge bootstrap: Instagram sometimes demands an emailed 6-digit
+code for password logins from unfamiliar IPs. For a single manual run, pass
+AWAIT_CHALLENGE_CODE=true; the owner pastes the fresh code in chat, the
+operator commits it as .challenge-code.json at the repo root, and the runner
+polls the GitHub API for it (up to ~8 min) instead of prompting on stdin.
+Delete the file right after the run. Scheduled runs never set this.
 
 Exit codes: 0 ok (even when nothing new), 2 login/challenge failure.
 """
@@ -132,6 +141,10 @@ def make_client(username, password, session_path):
 
     cl = Client()
     cl.delay_range = [1, 3]
+    if os.environ.get("AWAIT_CHALLENGE_CODE", "").lower() == "true":
+        # One-time verification run: wait for the owner-supplied emailed code
+        # (committed as .challenge-code.json) instead of prompting on stdin.
+        cl.challenge_code_handler = _poll_challenge_code
     if os.path.exists(session_path):
         try:
             with open(session_path) as f:
@@ -153,6 +166,58 @@ def make_client(username, password, session_path):
         log(f"warning: could not write session cache: {e}")
     log(f"logged in as {cl.username} (id {cl.user_id})")
     return cl
+
+
+_CHALLENGE_CODE_DEADLINE = 0.0
+
+
+def _poll_challenge_code(username, choice):
+    """instagrapi challenge_code_handler for one-time verification runs.
+
+    Polls the GitHub contents API for .challenge-code.json at the repo root
+    (committed by the operator after the owner pastes the emailed 6-digit
+    code). Waits up to ~8 minutes total across all invocations, then gives
+    up so the run fails fast instead of hanging past the job timeout.
+    """
+    global _CHALLENGE_CODE_DEADLINE
+    import base64
+    import time as _time
+
+    if _CHALLENGE_CODE_DEADLINE == 0.0:
+        _CHALLENGE_CODE_DEADLINE = _time.time() + 480
+        log("CHALLENGE: Instagram emailed a 6-digit verification code.")
+        log("Waiting up to 8 minutes for .challenge-code.json in the repo...")
+
+    token = os.environ.get("GITHUB_TOKEN", "")
+    repo = os.environ.get("GITHUB_REPOSITORY", "")
+    ref = os.environ.get("GITHUB_REF_NAME", "main")
+    if not token or not repo:
+        log("challenge poll: GITHUB_TOKEN or GITHUB_REPOSITORY missing")
+        return None
+    url = (f"https://api.github.com/repos/{repo}/contents/"
+           f".challenge-code.json?ref={ref}")
+    while _time.time() < _CHALLENGE_CODE_DEADLINE:
+        try:
+            req = urllib.request.Request(url, headers={
+                "Authorization": "Bearer " + token,
+                "Accept": "application/vnd.github+json",
+                "User-Agent": "ig-dm-autoreply",
+            })
+            with urllib.request.urlopen(req, timeout=20) as resp:
+                payload = json.loads(resp.read().decode())
+            raw = base64.b64decode(payload["content"]).decode()
+            code = str(json.loads(raw).get("code") or "").strip()
+            if code:
+                log("challenge code received, submitting...")
+                return code
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                log(f"challenge poll: HTTP {e.code}, retrying...")
+        except Exception as e:  # noqa: BLE001 - transient, keep polling
+            log(f"challenge poll error ({type(e).__name__}), retrying...")
+        _time.sleep(15)
+    log("timed out waiting for the challenge code")
+    return None
 
 
 def _thread_id(tid):
