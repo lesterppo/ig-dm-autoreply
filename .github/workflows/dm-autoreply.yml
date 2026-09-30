@@ -1,0 +1,74 @@
+name: DM auto-reply
+
+# Friend handles live in the IG_TARGETS secret (never hardcoded), so the repo
+# can stay public and privacy-safe.
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run (log what would be sent, send nothing)"
+        required: true
+        default: "true"
+        type: choice
+        options: ["true", "false"]
+      targets:
+        description: "Comma-separated IG usernames (optional override; default: IG_TARGETS secret)"
+        required: false
+        default: ""
+
+  # LIVE: runs every 10 minutes.
+  schedule:
+    - cron: "*/10 * * * *"
+
+concurrency:
+  group: dm-autoreply
+  cancel-in-progress: false
+
+permissions:
+  contents: write  # to commit the bookmark state file back to the repo
+
+jobs:
+  autoreply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r automation/requirements.txt
+
+      - name: Restore Instagram session cache
+        uses: actions/cache@v4
+        with:
+          path: automation/.session.json
+          # The session id is stored in the repo secrets; including a short
+          # hash lets a fresh login happen when you rotate credentials.
+          key: ig-session-${{ hashFiles('automation/requirements.txt') }}
+
+      - name: Run auto-replier
+        env:
+          IG_USERNAME: ${{ secrets.IG_USERNAME }}
+          IG_PASSWORD: ${{ secrets.IG_PASSWORD }}
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          NVIDIA_MODEL: z-ai/glm-5.3-flash
+          NVIDIA_FALLBACK_MODEL: nvidia/nemotron-3-super-120b-a12b
+          # Manual dispatch may override; scheduled runs use the secret.
+          TARGETS: ${{ inputs.targets || secrets.IG_TARGETS }}
+          # Scheduled runs have no inputs -> default to LIVE sends.
+          DRY_RUN: ${{ inputs.dry_run || 'false' }}
+        run: python automation/dm_autoreply.py
+
+      - name: Persist bookmark state
+        # Commit the updated last-seen bookmarks so the next run only
+        # handles genuinely new messages. Skipped when nothing changed.
+        run: |
+          git config user.name "dm-autoreply-bot"
+          git config user.email "dm-autoreply-bot@users.noreply.github.com"
+          git add automation/state.json
+          git diff --cached --quiet || git commit -m "autoreply: update bookmarks [skip ci]"
+          git push
