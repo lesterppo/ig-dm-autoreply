@@ -50,6 +50,21 @@ jobs:
           # hash lets a fresh login happen when you rotate credentials.
           key: ig-session-${{ hashFiles('automation/requirements.txt') }}
 
+      - name: Restore Instagram session from secret
+        # One-time bootstrap: after Instagram's login challenge is completed
+        # manually, the verified session lives in IG_SESSION_JSON so runners
+        # never do a password login (which is what triggers challenges).
+        # This overwrites the cache above on purpose: the secret is fresher.
+        env:
+          IG_SESSION_JSON: ${{ secrets.IG_SESSION_JSON }}
+        run: |
+          if [ -n "$IG_SESSION_JSON" ]; then
+            printf '%s' "$IG_SESSION_JSON" > automation/.session.json
+            echo "session restored from IG_SESSION_JSON secret"
+          else
+            echo "no IG_SESSION_JSON secret; using cache or fresh login"
+          fi
+
       - name: Run auto-replier
         env:
           IG_USERNAME: ${{ secrets.IG_USERNAME }}
