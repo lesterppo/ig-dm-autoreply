@@ -23,9 +23,11 @@ on:
         type: choice
         options: ["false", "true"]
 
-  # LIVE: runs every 30 minutes.
-  schedule:
-    - cron: "*/30 * * * *"
+  # Schedule disabled: VM cron (github-dm-vm-reply) is the scheduler now.
+  # GitHub's built-in scheduler was not firing reliably. Keep workflow_dispatch
+  # for manual runs.
+  #schedule:
+  #  - cron: "*/30 * * * *"
 
 concurrency:
   group: dm-autoreply
