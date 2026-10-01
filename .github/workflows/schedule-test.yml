@@ -1,0 +1,10 @@
+name: Schedule test
+on:
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "scheduler alive at $(date -u)"
