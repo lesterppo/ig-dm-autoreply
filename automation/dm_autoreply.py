@@ -136,10 +136,25 @@ def draft_reply(api_key, models, friend_name, history_lines, new_lines):
     raise RuntimeError(f"all NVIDIA models failed (last: {last_err}")
 
 
+# Stable device fingerprint (instagrapi 3.x): every fresh login presents as the
+# same device, so a completed email verification keeps counting for later
+# runs instead of each attempt looking like a brand-new phone. These are
+# random identifiers, not secrets.
+_STABLE_UUIDS = {
+    "phone_id": "e6b4c29d-6908-435f-88ec-3bd9e17e8760",
+    "uuid": "a3f1bdc7-41ee-4a4a-8c8b-4da97d54dddf",
+    "client_session_id": "3481c650-7471-43d5-a963-2a4e3302f87d",
+    "advertising_id": "973443aa-5f0c-4d46-a373-063813d4c0f7",
+    "android_device_id": "android-409c26a6b623b92b",
+    "request_id": "bb2d0c55-b1f2-4444-b5db-040b57a22cce",
+    "tray_session_id": "c14b1c76-c0cf-4f38-ab1f-e09a775d00ce",
+}
+
+
 def make_client(username, password, session_path):
     from instagrapi import Client
 
-    cl = Client()
+    cl = Client(settings={"uuids": dict(_STABLE_UUIDS)})
     cl.delay_range = [1, 3]
     if os.environ.get("AWAIT_CHALLENGE_CODE", "").lower() == "true":
         # One-time verification run: wait for the owner-supplied emailed code
@@ -147,8 +162,7 @@ def make_client(username, password, session_path):
         cl.challenge_code_handler = _poll_challenge_code
     if os.path.exists(session_path):
         try:
-            with open(session_path) as f:
-                cl.load_settings(json.load(f))
+            cl.load_settings(session_path)
             log("loaded cached Instagram session")
         except Exception as e:  # noqa: BLE001 - fall through to fresh login
             log(f"session cache unreadable ({e}), will log in fresh")
@@ -160,8 +174,7 @@ def make_client(username, password, session_path):
             "Instagram app, approve/complete it, then re-run.")
         sys.exit(2)
     try:
-        with open(session_path, "w") as f:
-            json.dump(cl.dump_settings(), f)
+        cl.dump_settings(session_path)
     except OSError as e:
         log(f"warning: could not write session cache: {e}")
     log(f"logged in as {cl.username} (id {cl.user_id})")
