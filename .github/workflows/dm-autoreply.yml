@@ -23,9 +23,9 @@ on:
         type: choice
         options: ["false", "true"]
 
-  # LIVE: runs every 10 minutes.
+  # LIVE: runs every 30 minutes.
   schedule:
-    - cron: "*/10 * * * *"
+    - cron: "*/30 * * * *"
 
 concurrency:
   group: dm-autoreply
