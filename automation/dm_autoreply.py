@@ -197,9 +197,9 @@ def _poll_challenge_code(username, choice):
     import time as _time
 
     if _CHALLENGE_CODE_DEADLINE == 0.0:
-        _CHALLENGE_CODE_DEADLINE = _time.time() + 600
+        _CHALLENGE_CODE_DEADLINE = _time.time() + 2700
         log("CHALLENGE: Instagram emailed a 6-digit verification code.")
-        log("Waiting up to 10 minutes for .challenge-code.json in the repo...")
+        log("Waiting up to 45 minutes for .challenge-code.json in the repo...")
 
     token = os.environ.get("GITHUB_TOKEN", "")
     repo = os.environ.get("GITHUB_REPOSITORY", "")
