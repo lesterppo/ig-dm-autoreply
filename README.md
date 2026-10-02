@@ -1,31 +1,43 @@
 # IG DM auto-reply
 
-Scheduled auto-replies to **authorized contacts only** (usernames kept in the
-`IG_TARGETS` GitHub secret, never in code) on the owner's Instagram DMs. Replies are drafted by a free NVIDIA
-model (`z-ai/glm-5.3-flash`, fallback `nvidia/nemotron-3-super-120b-a12b`)
-following a strict persona prompt: short, playful, no plans, no personal
-details, escalate anything serious. (Note: the popular reasoning models were
-tested and rejected — they leak chain-of-thought into the reply text; the
-GLM flash model keeps thinking in a separate field.)
+Automatic replies to **authorized contacts only** (usernames kept in the
+`IG_TARGETS` secret, never in code) on the owner's Instagram DMs. Replies are
+drafted by a free NVIDIA model (`z-ai/glm-5.3-flash`, fallback
+`nvidia/nemotron-3-super-120b-a12b`) following a persona prompt: short,
+playful, no plans, no personal details. Every message gets a reply — no
+escalation, no going quiet. (Note: the popular reasoning models were tested
+and rejected — they leak chain-of-thought into the reply text; the GLM flash
+model keeps thinking in a separate field.)
 
 ## How it works
 
-`automation/dm_autoreply.py` runs on GitHub Actions:
+A cron job on the owner's VM runs `vm_dm_reply.py` every 5 minutes:
 
-1. Logs in to Instagram via `instagrapi` (session cached between runs; password
-   login only when the session expires).
-2. Finds the 1:1 thread for each target, lists messages newer than the stored
-   bookmark (`automation/state.json`, committed back each run).
-3. Drafts one reply per thread via the NVIDIA chat API. If the model returns
-   `ESCALATE: <reason>`, nothing is sent and the run summary flags it for review.
-4. Sends (or dry-run logs), advances the bookmark.
+1. Checks Instagram DMs via `instagram-messages-cli` (existing auth).
+2. Finds messages newer than the stored bookmark (`state.json`) from each
+   authorized contact.
+3. Drafts one reply per thread via the NVIDIA chat API (free tier).
+4. Sends the reply, advances the bookmark.
 
-`concurrency.group: dm-autoreply` guarantees a single writer so two runs can
-never double-reply.
+If both NVIDIA models fail, a generic fallback reply ("Haha 😂") is sent
+rather than leaving the message unanswered. Truncated or garbage model
+outputs are rejected and retried with the fallback model.
+
+## GitHub Actions (manual only)
+
+The `.github/workflows/dm-autoreply.yml` workflow is kept for **manual runs
+only** (`workflow_dispatch`). Its `schedule` trigger is disabled — GitHub's
+built-in scheduler was not firing reliably, so the VM cron is the sole
+scheduler.
+
+`automation/dm_autoreply.py` is the GitHub Actions version of the script
+(uses `instagrapi`). It supports `dry_run` mode: drafts replies but sends
+nothing, useful for testing prompt changes before they go live.
 
 ## Setup (one time)
 
-Add four secrets under **Settings → Secrets and variables → Actions**:
+For GitHub Actions manual runs, add four secrets under **Settings → Secrets
+and variables → Actions**:
 
 | Secret | Value |
 |---|---|
@@ -43,22 +55,18 @@ Instagram app once from a trusted device before the first run.
 2. Keep `dry_run: true`. The run logs in with your real account, reads the real
    threads, drafts real replies with the NVIDIA model, but **sends nothing**.
 3. Review the step summary: each target shows `init` (first run), `noop`,
-   `dryrun`, `replied`, or `escalated`, plus the exact drafted text in the logs.
+   `dryrun`, or `replied`, plus the exact drafted text in the logs.
 4. If the drafts sound right, run again with `dry_run: false` to send one real
    batch, then watch the thread.
-5. **Ship:** the `schedule` block in `.github/workflows/dm-autoreply.yml` is
-   already live — the job runs every 10 minutes on its own. Nothing else to do.
 
 ## Risks (read before shipping)
 
-- This uses `instagrapi`, an **unofficial** library — Instagram ToS violation,
-  account warning/ban risk. GitHub runners are datacenter IPs, which Instagram
-  treats with extra suspicion (fresh logins are the riskiest moment; the
-  session cache exists to minimize them).
-- If Instagram throws a login challenge mid-schedule, the run fails loudly
-  (exit 2) and waits for you to clear it in the app — DMs simply go unanswered
-  until then.
-- NVIDIA free tier: ~40 req/min, ~1000 req/day — far above what two DM threads
+- This uses unofficial Instagram automation — Instagram ToS violation,
+  account warning/ban risk. Datacenter IPs (GitHub runners) get extra
+  suspicion; the VM approach with cached auth minimizes fresh logins.
+- If Instagram throws a login challenge, runs fail until it's cleared in the
+  app — DMs simply go unanswered until then.
+- NVIDIA free tier: ~40 req/min, ~1000 req/day — far above what DM threads
   need.
 - The model drafts, but the guardrails are prompt-based: review dry-run output
-  before going live, and keep an eye on the run summaries for `escalated`.
+  before going live.
